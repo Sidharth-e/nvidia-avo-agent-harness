@@ -11,4 +11,5 @@ dependencies = [
     "langchain-ollama>=0.2.0",
     "neo4j>=5.20.0",
     "pydantic>=2.0.0",
+    "rich>=13.0.0",
 ]

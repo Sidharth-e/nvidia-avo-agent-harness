@@ -3,8 +3,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 from deepagents import create_deep_agent
 from langchain_ollama import ChatOllama
+
+from logging_formatter import HarnessLogger
 
 
 def _load_env() -> None:
@@ -212,13 +215,26 @@ def inspect_parent_solution(attempt_id: str) -> str:
 
 def evaluate_and_verify_candidate(code: str, test_input: str = "") -> str:
     """Execute and verify candidate code in a sandbox environment."""
+    import io
+    import contextlib
+
     try:
         scope: Dict[str, Any] = {}
-        exec(code, scope)
-        if "solution" in scope and callable(scope["solution"]):
-            result = scope["solution"](test_input) if test_input else scope["solution"]()
-            return f"VERIFICATION_SUCCESS: Execution output: {result}"
-        return "VERIFICATION_SUCCESS: Code executed cleanly without runtime exceptions."
+        stdout_capture = io.StringIO()
+        with contextlib.redirect_stdout(stdout_capture):
+            exec(code, scope)
+            if "solution" in scope and callable(scope["solution"]):
+                result = scope["solution"](test_input) if test_input else scope["solution"]()
+                captured = stdout_capture.getvalue().strip()
+                output_parts = [f"VERIFICATION_SUCCESS: Execution output: {result}"]
+                if captured:
+                    output_parts.append(f"Stdout: {captured[:500]}")
+                return "\n".join(output_parts)
+        captured = stdout_capture.getvalue().strip()
+        output_parts = ["VERIFICATION_SUCCESS: Code executed cleanly without runtime exceptions."]
+        if captured:
+            output_parts.append(f"Stdout: {captured[:500]}")
+        return "\n".join(output_parts)
     except Exception as exc:
         return f"VERIFICATION_FAILED: Runtime error: {type(exc).__name__}: {str(exc)}"
 
@@ -249,7 +265,8 @@ variation_operator_subagent: Dict[str, Any] = {
     "name": "agentic-variation-operator",
     "description": (
         "Autonomous variation operator performing the Inspect-Plan-Implement-Evaluate loop. "
-        "Formulates mutation hypotheses, writes code edits, verifies execution, and records results."
+        "Formulates mutation hypotheses, writes code edits, verifies execution, and records results. "
+        "Use for evolutionary search and algorithmic optimization tasks."
     ),
     "system_prompt": (
         "You are an Agentic Variation Operator (AVO). Your role is to evolve solutions via a 4-step loop:\n"
@@ -267,16 +284,95 @@ variation_operator_subagent: Dict[str, Any] = {
     ],
 }
 
+coding_subagent: Dict[str, Any] = {
+    "name": "coding-agent",
+    "description": (
+        "Expert software engineering agent for code analysis, refactoring, "
+        "debugging, implementation, and architecture tasks. Use for any coding-related work."
+    ),
+    "system_prompt": (
+        "You are an expert software engineer. Your workflow:\n"
+        "1. UNDERSTAND: Read the codebase structure, understand existing patterns and conventions.\n"
+        "2. PLAN: Break down the task into discrete, testable steps. Write your plan.\n"
+        "3. IMPLEMENT: Make changes file by file. Follow existing code style and patterns.\n"
+        "4. VERIFY: Call evaluate_and_verify_candidate to test your code. Fix failures before proceeding.\n"
+        "5. REVIEW: Re-read your changes for correctness, edge cases, and style consistency.\n\n"
+        "Rules:\n"
+        "- Never guess at API signatures — inspect the source first.\n"
+        "- If tests fail repeatedly with the same approach, stop and re-evaluate the strategy.\n"
+        "- Keep changes minimal and focused. Avoid unnecessary refactors.\n"
+        "- Record your final solution using record_variation with an appropriate fitness score."
+    ),
+    "tools": [
+        recall_lineage,
+        inspect_parent_solution,
+        evaluate_and_verify_candidate,
+        record_variation,
+    ],
+}
+
+research_subagent: Dict[str, Any] = {
+    "name": "research-agent",
+    "description": (
+        "Deep research agent for investigating topics, analyzing documents, "
+        "comparing approaches, and producing structured research summaries. "
+        "Use for any research, analysis, or investigation task."
+    ),
+    "system_prompt": (
+        "You are a thorough research analyst. Your workflow:\n"
+        "1. SCOPE: Clarify the research question and define success criteria.\n"
+        "2. INVESTIGATE: Gather information from all available sources and prior attempts.\n"
+        "3. ANALYZE: Cross-reference findings for accuracy, identify patterns and gaps.\n"
+        "4. SYNTHESIZE: Produce a structured summary with key findings and recommendations.\n"
+        "5. RECORD: Use record_variation to commit your findings with a confidence score.\n\n"
+        "Always start by calling recall_lineage to check for prior research on this topic."
+    ),
+    "tools": [
+        recall_lineage,
+        record_variation,
+    ],
+}
+
+story_writing_subagent: Dict[str, Any] = {
+    "name": "story-writer",
+    "description": (
+        "Creative writing agent for stories, narratives, world-building, "
+        "character development, and iterative draft refinement. "
+        "Use for any creative or narrative writing task."
+    ),
+    "system_prompt": (
+        "You are a skilled creative writer. Your workflow:\n"
+        "1. CONCEPT: Develop the premise, themes, and narrative structure.\n"
+        "2. OUTLINE: Create a scene-by-scene or chapter-by-chapter breakdown.\n"
+        "3. DRAFT: Write with vivid prose, strong dialogue, and consistent voice.\n"
+        "4. REVISE: Refine pacing, deepen characters, sharpen language.\n"
+        "5. POLISH: Final pass for consistency, impact, and emotional resonance.\n\n"
+        "Record each draft iteration using record_variation with a quality score."
+    ),
+    "tools": [
+        record_variation,
+    ],
+}
+
 supervisor_prompt = """
-You are the Supervisor Orchestrator of an Agentic Variation Operators (AVO) evolutionary search harness.
+You are the Supervisor Orchestrator. You manage specialized subagents for different domains.
+
+Subagent Selection:
+- agentic-variation-operator: Evolutionary search, algorithmic optimization, iterative code improvement.
+- coding-agent: Software engineering, code analysis, refactoring, debugging, implementation.
+- research-agent: Deep research, document analysis, topic investigation, structured summaries.
+- story-writer: Creative writing, narratives, world-building, character development.
+
+Select the most appropriate subagent based on the user's task. If unsure, use the general-purpose agent.
 
 Execution Workflow:
-1. Call check_progress to inspect whether search fitness has stagnated.
-2. If stagnation is detected, pivot search directions, mandate a novel exploration strategy, or select an alternative parent lineage.
-3. Delegate generation tasks to the agentic-variation-operator subagent.
-4. Review the outcome and repeat until optimization convergence or the iteration budget is exhausted.
+1. Analyze the user's task to determine the appropriate domain.
+2. Call check_progress to inspect whether prior work has stagnated.
+3. If stagnation is detected, pivot strategies or select an alternative approach.
+4. Delegate the task to the appropriate specialized subagent.
+5. Review the outcome and iterate if needed until the task is complete or the budget is exhausted.
 
-Do not write variation implementations directly; delegate all candidate exploration and verification to the subagent.
+Do not perform tasks directly; always delegate to the appropriate subagent.
 """
 
 ollama_model_name = os.environ.get("OLLAMA_MODEL", "gemma4:e2b-mlx")
@@ -291,23 +387,35 @@ local_llm = ChatOllama(
 agent = create_deep_agent(
     model=local_llm,
     tools=[check_progress],
-    subagents=[variation_operator_subagent],
+    subagents=[
+        variation_operator_subagent,
+        coding_subagent,
+        research_subagent,
+        story_writing_subagent,
+    ],
     system_prompt=supervisor_prompt,
 )
 
 
 def run_harness(task_description: str, iterations: int = 5) -> Any:
-    return agent.invoke({
+    harness_logger = HarnessLogger(task_description, iterations)
+    harness_logger.print_header()
+
+    result = None
+    for event in agent.stream({
         "messages": [
             {
                 "role": "user",
                 "content": f"Task: {task_description}. Run {iterations} evolutionary search iterations.",
             }
         ]
-    })
+    }):
+        harness_logger.log_event(event)
+        result = event
+
+    return result
 
 
 if __name__ == "__main__":
     initial_task = "Optimize an algorithm for computing running matrix operations"
-    output = run_harness(initial_task, iterations=3)
-    print(output)
+    run_harness(initial_task, iterations=3)

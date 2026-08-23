@@ -1,0 +1,14 @@
+[project]
+name = "nvidia-avo-agent-harness"
+version = "0.1.0"
+description = "Harness for NVIDIA AVO (Agentic Variation Operators), a long-horizon autonomous evolutionary search architecture"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "deepagents>=0.1.0",
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-ollama>=0.2.0",
+    "neo4j>=5.20.0",
+    "pydantic>=2.0.0",
+]

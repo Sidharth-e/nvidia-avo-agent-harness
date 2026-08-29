@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from deepagents import create_deep_agent
+from deepagents import SubAgent, create_deep_agent
 from langchain_ollama import ChatOllama
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -195,7 +195,7 @@ def evaluate_matrix_code(code: str) -> Optional[float]:
 
     try:
         res = func([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
-        if len(res) != 2:
+        if not isinstance(res, (list, tuple)) or len(res) != 2:
             return None
         start = time.perf_counter()
         for _ in range(50):
@@ -206,7 +206,7 @@ def evaluate_matrix_code(code: str) -> Optional[float]:
         return None
 
 
-def evaluate_generic_code(code: str) -> Optional[float]:
+def evaluate_generic_code(code: str) -> float:
     """Fallback for arbitrary code: reward clean execution + a lightweight
     complexity/correctness proxy. Not a substitute for a real task evaluator —
     use this only when no task-specific evaluator matches."""
@@ -345,7 +345,7 @@ def check_progress(task: str) -> str:
 # SUBAGENTS
 # =========================================================================
 
-variation_operator_subagent: Dict[str, Any] = {
+variation_operator_subagent: SubAgent = {
     "name": "agentic-variation-operator",
     "description": (
         "Autonomous variation operator performing the Inspect-Plan-Implement-Evaluate loop. "
@@ -366,7 +366,7 @@ variation_operator_subagent: Dict[str, Any] = {
     "tools": [recall_lineage, inspect_parent_solution, evaluate_and_verify_candidate, record_variation],
 }
 
-coding_subagent: Dict[str, Any] = {
+coding_subagent: SubAgent = {
     "name": "coding-agent",
     "description": (
         "Expert software engineering agent for code analysis, refactoring, debugging, "
@@ -382,7 +382,7 @@ coding_subagent: Dict[str, Any] = {
     "tools": [recall_lineage, inspect_parent_solution, evaluate_and_verify_candidate, record_variation],
 }
 
-research_subagent: Dict[str, Any] = {
+research_subagent: SubAgent = {
     "name": "research-agent",
     "description": (
         "Deep research agent for investigating topics, analyzing documents, comparing approaches, "
@@ -396,7 +396,7 @@ research_subagent: Dict[str, Any] = {
     "tools": [recall_lineage, record_variation],
 }
 
-story_writing_subagent: Dict[str, Any] = {
+story_writing_subagent: SubAgent = {
     "name": "story-writer",
     "description": (
         "Creative writing agent for stories, narratives, world-building, character development, "
@@ -432,13 +432,34 @@ Hard limits — violating these wastes compute and is treated as an error:
 Do not perform tasks directly; always delegate to the appropriate subagent.
 """
 
-ollama_model_name = os.environ.get("OLLAMA_MODEL", "gemma4:e2b-mlx")
-ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+is_cloud_mode = (
+    os.environ.get("OLLAMA_MODE", "").strip().lower() == "cloud"
+    or os.environ.get("USE_OLLAMA_CLOUD", "").strip().lower() in ("true", "1", "yes")
+)
 
-local_llm = ChatOllama(model=ollama_model_name, base_url=ollama_base_url, temperature=0.0)
+if is_cloud_mode:
+    ollama_model_name = os.environ.get("OLLAMA_CLOUD_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.3")
+    ollama_base_url = os.environ.get("OLLAMA_CLOUD_BASE_URL") or os.environ.get("OLLAMA_BASE_URL", "https://api.ollama.com")
+    ollama_api_key = os.environ.get("OLLAMA_CLOUD_API_KEY") or os.environ.get("OLLAMA_API_KEY") or os.environ.get("OLLAMA_KEY")
+    client_kwargs: Optional[Dict[str, Any]] = (
+        {"headers": {"Authorization": f"Bearer {ollama_api_key}"}}
+        if ollama_api_key
+        else None
+    )
+else:
+    ollama_model_name = os.environ.get("OLLAMA_LOCAL_MODEL") or os.environ.get("OLLAMA_MODEL", "gemma4:e2b-mlx")
+    ollama_base_url = os.environ.get("OLLAMA_LOCAL_BASE_URL") or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    client_kwargs = None
+
+llm = ChatOllama(
+    model=ollama_model_name,
+    base_url=ollama_base_url,
+    temperature=0.0,
+    client_kwargs=client_kwargs,
+)
 
 agent = create_deep_agent(
-    model=local_llm,
+    model=llm,
     tools=[check_progress],
     subagents=[variation_operator_subagent, coding_subagent, research_subagent, story_writing_subagent],
     system_prompt=supervisor_prompt,

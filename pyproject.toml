@@ -13,3 +13,14 @@ dependencies = [
     "pydantic>=2.0.0",
     "rich>=13.0.0",
 ]
+
+[tool.pyrefly]
+project-includes = ["*.py", "src/**/*.py"]
+project-excludes = [
+    "**/__pyrefly_virtual__/**",
+    "**/inmemory/**",
+    "**/.venv/**",
+    "**/__pycache__/**"
+]
+use-ignore-files = true
+

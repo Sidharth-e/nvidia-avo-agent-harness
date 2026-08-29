@@ -73,16 +73,29 @@ Monitors global fitness dynamics across generations. If scores plateau over $N$ 
    ```
    Edit `.env` if you wish to customize your Neo4j password or connection settings.
 
-### Local LLM via Ollama
-Ensure Ollama is running locally with the MLX-quantized Gemma model:
+### LLM via Ollama (Local vs Cloud Switching)
+
+You can toggle between local Ollama and Ollama Cloud using the `OLLAMA_MODE` environment variable (`local` or `cloud`):
+
+**Option 1: Local Mode (`OLLAMA_MODE="local"` or default)**
+Ensure Ollama is running locally:
 ```bash
 ollama run gemma4:e2b-mlx
 ```
-
-Configure environment variables if needed:
+Environment settings in `.env`:
 ```bash
-export OLLAMA_MODEL="gemma4:e2b-mlx"
-export OLLAMA_BASE_URL="http://localhost:11434"
+OLLAMA_MODE=local
+OLLAMA_LOCAL_MODEL=gemma4:e2b-mlx
+OLLAMA_LOCAL_BASE_URL=http://localhost:11434
+```
+
+**Option 2: Cloud Mode (`OLLAMA_MODE="cloud"`)**
+Configure Ollama Cloud credentials in `.env`:
+```bash
+OLLAMA_MODE=cloud
+OLLAMA_CLOUD_MODEL=llama3.3
+OLLAMA_CLOUD_BASE_URL=https://api.ollama.com
+OLLAMA_API_KEY="your_ollama_cloud_api_key"
 ```
 
 ### Neo4j Graph Database (Docker Compose)

@@ -1,7 +1,8 @@
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages.tool import ToolCall
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -10,6 +11,14 @@ from rich import box
 
 
 console = Console()
+
+
+def _to_str(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(item) for item in content)
+    return str(content) if content is not None else ""
 
 
 def _progress_bar(score: float, width: int = 10) -> str:
@@ -44,7 +53,8 @@ def _extract_duration(msg: AIMessage) -> Optional[float]:
 
 def _extract_model_name(msg: AIMessage) -> str:
     metadata = msg.response_metadata or {}
-    return metadata.get("model_name", metadata.get("model", "unknown"))
+    model = metadata.get("model_name") or metadata.get("model") or "unknown"
+    return str(model)
 
 
 def _short_id(full_id: str) -> str:
@@ -70,6 +80,9 @@ class HarnessLogger:
         console.print()
 
     def log_event(self, event: Dict[str, Any]) -> None:
+        if "warning" in event:
+            console.print(f"  ⚠️  [bold red]{event['warning']}[/bold red]\n")
+            return
         for key, value in event.items():
             if not isinstance(value, dict):
                 continue
@@ -89,12 +102,14 @@ class HarnessLogger:
         if msg.tool_calls:
             for tc in msg.tool_calls:
                 self._log_tool_call(tc, model, duration, tokens)
-        elif msg.content:
-            self._log_final_response(msg.content, model, duration, tokens)
+        else:
+            content_str = _to_str(msg.content)
+            if content_str:
+                self._log_final_response(content_str, model, duration, tokens)
 
     def _log_tool_call(
         self,
-        tool_call: Dict[str, Any],
+        tool_call: Union[Dict[str, Any], ToolCall],
         model: str,
         duration: Optional[float],
         tokens: Dict[str, int],
@@ -133,7 +148,7 @@ class HarnessLogger:
             console.print()
 
     def _log_tool_message(self, msg: ToolMessage) -> None:
-        content = msg.content or ""
+        content = _to_str(msg.content)
         name = getattr(msg, "name", None) or ""
 
         if name == "task":
